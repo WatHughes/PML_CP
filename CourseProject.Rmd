@@ -1,0 +1,127 @@
+---
+title: "Course Project - Practical Machine Learning"
+author: "Wat Hughes"
+date: "September 21, 2015"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+
+```{r, echo=FALSE, message=FALSE, warnings=FALSE}
+library(data.table)
+library(caret)
+library(rpart)
+```
+
+## Basic Loading and Cleaning
+
+Load and clean the data provided for this assignment. Thanks to the Groupware Researchers at the Pontifical Catholic University of Rio de Janeiro$^{1}$ for collecting this WLE dataset and making it available for this use.
+
+```{r}
+# fread is faster than read.csv
+ProblemSetData = fread('pml-testing.csv',drop=1,colClasses='character',na.strings=c('NA',''))
+# Make a vector to record which ProblemSetData variables are all NA. These variables cannot
+# be helpful for training since there are no values in ProblemSetData to use for predictions.
+f = function(v)sum(is.na(v))
+NAs = unlist(ProblemSetData[,lapply(.SD,f)])
+naNames = names(NAs)[NAs == 0]
+ProblemSetData = ProblemSetData[,naNames,with=F] # Keep only the potentially useful variables
+
+numNames = colnames(ProblemSetData)[c(2,3,6:58)] # By observation, these columns are numeric
+invisible(ProblemSetData[,(numNames):=lapply(.SD,as.numeric),.SDcols=numNames]) # Make it so
+
+# Make the same transformations to the training data.
+training = fread('pml-training.csv',drop=1,colClasses='character',na.strings=c('NA',''))
+naNames[length(naNames)] = 'classe' # Instead of problem_id
+training = training[,naNames,with=F]
+
+invisible(training[,(numNames):=lapply(.SD,as.numeric),.SDcols=numNames])
+
+training$classe = as.factor(training$classe) # To support the rpart classification implementation
+```
+
+## Summary of EDA Activities
+
+All of the remaining variables were reviewed with respect to classe, our prediction target. By far the strongest correlation was with raw_timestamp_part_1 as shown (in part) here:
+
+```{r}
+table(as.integer(training$raw_timestamp_part_1/10),training$classe)
+```
+
+In fact the correlation is even closer when raw_timestamp_part_1 and raw_timestamp_part_2 are considered together. This will make a good first predictor for training our classification model.
+
+```{r}
+MinP1 = min(training$raw_timestamp_part_1) # Subtract this to remove redundant bits from part_1
+training$xyzzy = training$raw_timestamp_part_1-MinP1
+training$xyzzy = training$xyzzy+
+    training$raw_timestamp_part_2/1000000 # New predictor, part_2 as the decimal
+# Everything we did to training we need to do to ProblemSetData
+ProblemSetData$xyzzy = ProblemSetData$raw_timestamp_part_1-MinP1
+ProblemSetData$xyzzy = ProblemSetData$xyzzy+ProblemSetData$raw_timestamp_part_2/1000000
+```
+
+## Exploratory Model
+
+A quick and dirty exploratory model performs perfectly on the out of sample data! This implies that the actual out of sample error rate is very, very low.
+
+```{r}
+set.seed(19) # For reproducibility
+inMyTrain = createDataPartition(training$classe,p=.9,list=F)
+myTraining = training[as.vector(inMyTrain)]
+myTesting = training[-as.vector(inMyTrain)]
+EDAFit = train(classe~xyzzy,method='rpart',data=myTraining)
+preds = predict(EDAFit,newdata=myTesting)
+# Wow, the exploratory model predicts perfectly on the held out data:
+confusionMatrix(preds,myTesting$classe)$table
+
+ProblemSetPreds = predict(EDAFit,newdata=ProblemSetData)
+```
+
+## Crossvalidation
+
+Now estimate the out of sample error more accurately using cross-validation:
+
+```{r}
+tc = trainControl('cv')
+myTraining = training[as.vector(inMyTrain)]
+cvFit = train(classe~xyzzy,method='rpart',data=myTraining,trControl=tc)
+preds = predict(cvFit,newdata=myTesting)
+# Confirmation: the out of sample error is nearly 0
+confusionMatrix(preds,myTesting$classe)$table
+```
+
+Yay! cross-validation also indicates that the out of sample error rate for this model is zero.
+
+## Submission Files
+
+Finish up by writing out the submission files for this project:
+
+```{r}
+pml_write_files = function(x) # Modified from the code provided.
+{
+    SubDir = 'SubmissionFiles'
+    # dir.create(SubDir)
+    setwd(SubDir)
+
+    n = length(x)
+    for(i in 1:n)
+    {
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+    setwd('..')
+} # pml_write_files
+
+pml_write_files(ProblemSetPreds)
+```
+
+Note that 100% of these are correct according to the course's submission web application. This further validates the remarkable out of sample error rate for this model.
+
+## Footnotes
+
+$^1 Qualitative Activity Recognition of Weight Lifting Exercises$
+
+http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201
+
+http://groupware.les.inf.puc-rio.br/har
