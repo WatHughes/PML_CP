@@ -124,16 +124,22 @@ testing = fread('pml-testing.csv',drop=1,colClasses='character',na.strings=c("NA
 
 # testing$amplitude_yaw_forearm # ick, instead of NA is "", overriding colClasses
 
+pml_write_files = function(x) # Modified from the code provided.
+{
+    SubDir = 'SubmissionFiles'
+    dir.create(SubDir)
+    setwd(SubDir)
 
-pml_write_files = function(x){
-  n = length(x)
-  for(i in 1:n){
-    filename = paste0("problem_id_",i,".txt")
-    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
-  }
-}
+    n = length(x)
+    for(i in 1:n)
+    {
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+} # pml_write_files
 
 pml_write_files(answers)
+
 str(testing)
 summary(testing)
 # testing[,6:159]=as.numeric(testing[,6:159])
@@ -164,3 +170,17 @@ naNames = names(NAs)[NAs == 0]
 testing = testing[,naNames,with=F]
 summary(testing)
 table(training$user_name)
+
+training$jj=training$raw_timestamp_part_1-min(training$raw_timestamp_part_1)
+training$me=training$jj*1000000+training$raw_timestamp_part_2
+training$oo=as.numeric(training$me)
+training$oo=as.numeric(training$me)/1000000
+training$classe=as.factor(training$classe)
+inMyTrain=createDataPartition(training$classe,p=.9,list=F)
+myTraining=training[as.vector(inMyTrain)]
+myTesting=training[-as.vector(inMyTrain)]
+modFit=train(classe~oo,method='rpart',data=myTraining)
+predict(modFit,newdata=myTesting)
+preds=predict(modFit,newdata=myTesting)
+table(myTesting$classe,preds)
+confusionMatrix(preds,myTesting$classe)
